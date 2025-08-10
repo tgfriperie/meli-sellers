@@ -1,7 +1,6 @@
-# web_scraper.py (versão final com Selenium Manager e compatibilidade Linux/Windows/Mac)
-
 import logging
 import re
+import tempfile
 from typing import Optional
 import requests
 from bs4 import BeautifulSoup
@@ -27,9 +26,15 @@ USER_AGENT = (
     '(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 )
 
+CHROME_PATHS = [
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser"
+]
+
 
 def _analisar_html(html_content: str, nickname_limpo: str, cidade: str) -> Optional[str]:
-    """Analisa o HTML retornado e tenta extrair o CNPJ mais relevante."""
     soup = BeautifulSoup(html_content, 'lxml')
     melhor_documento: Optional[str] = None
     maior_pontuacao = -1
@@ -59,13 +64,12 @@ def _analisar_html(html_content: str, nickname_limpo: str, cidade: str) -> Optio
 
 
 def _buscar_com_selenium_fallback(url: str, nickname_limpo: str, cidade: str) -> str:
-    """Fallback com Selenium usando Selenium Manager para gerenciar o driver automaticamente."""
     logging.warning("Abordagem rápida falhou. Usando fallback com Selenium (mais lento).")
     driver = None
     try:
         options = Options()
         options.add_argument(f'user-agent={USER_AGENT}')
-        options.add_argument('--headless=new')  # Headless moderno
+        options.add_argument('--headless=new')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
@@ -75,9 +79,21 @@ def _buscar_com_selenium_fallback(url: str, nickname_limpo: str, cidade: str) ->
             "prefs", {"profile.managed_default_content_settings.images": 2}
         )
 
-        # Selenium Manager cuidará do ChromeDriver automaticamente
-        driver = webdriver.Chrome(options=options)
+        # Define diretório de dados temporário único
+        temp_user_data_dir = tempfile.mkdtemp()
+        options.add_argument(f"--user-data-dir={temp_user_data_dir}")
 
+        # Detecta e define binário do Chrome se existir
+        for path in CHROME_PATHS:
+            try:
+                with open(path):
+                    options.binary_location = path
+                    logging.info(f"Usando binário do Chrome em: {path}")
+                    break
+            except FileNotFoundError:
+                continue
+
+        driver = webdriver.Chrome(options=options)
         driver.get(url)
         WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.ID, "rso")))
 
@@ -95,7 +111,6 @@ def _buscar_com_selenium_fallback(url: str, nickname_limpo: str, cidade: str) ->
 
 
 def buscar_cnpj_rapidamente(nickname: str, cidade: str) -> str:
-    """Busca CNPJ usando primeiro requests, depois Selenium como fallback."""
     nickname_limpo = re.sub(r'^\.|\.$', '', nickname).strip()
     query = f'"{nickname_limpo}" "{cidade}" {SITES_ALVO}'
     url = f"https://www.google.com/search?q={quote_plus(query)}&gl=br&hl=pt"
@@ -107,7 +122,6 @@ def buscar_cnpj_rapidamente(nickname: str, cidade: str) -> str:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
 
-        # Detecta bloqueio do Google
         if "Nossos sistemas detectaram tráfego incomum" in response.text:
             logging.warning("Google retornou página de bloqueio para o `requests`.")
             return _buscar_com_selenium_fallback(url, nickname_limpo, cidade)
