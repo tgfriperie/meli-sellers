@@ -3,3 +3,7 @@ streamlit
 requests
 beautifulsoup4
 selenium
+lxml
+openpyxl
+selenium>=4.10
+webdriver-manager
