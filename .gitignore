@@ -1,0 +1,16 @@
+# Ambientes Virtuais
+venv/
+.venv/
+env/
+.env
+
+# Cache do Python
+__pycache__/
+*.pyc
+
+# Arquivos do webdriver-manager
+.wdm/
+
+# Arquivos de IDEs
+.vscode/
+.idea/
