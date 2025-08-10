@@ -1,25 +1,19 @@
-# web_scraper.py (versão HÍBRIDA final - para Local e Streamlit)
+# web_scraper.py (versão final com Selenium Manager)
 
 import logging
 import re
-import random
-import sys  # <-- IMPORTANTE: Importar o 'sys' para checar o sistema operacional
 from typing import Optional
 import time
 
-# Bibliotecas para a abordagem rápida (HTTP)
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import quote_plus
 
-# Bibliotecas para o fallback (Selenium)
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 
 # --- Configuração do Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,7 +25,6 @@ SITES_ALVO = "site:econodata.com.br OR site:cnpja.com OR site:cnpj.biz OR site:c
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 
 def _analisar_html(html_content: str, nickname_limpo: str, cidade: str) -> Optional[str]:
-    # Esta função está correta e não precisa de alterações.
     soup = BeautifulSoup(html_content, 'lxml')
     melhor_documento: Optional[str] = None
     maior_pontuacao = -1
@@ -56,50 +49,39 @@ def _analisar_html(html_content: str, nickname_limpo: str, cidade: str) -> Optio
     return melhor_documento
 
 def _buscar_com_selenium_fallback(url: str, nickname_limpo: str, cidade: str) -> str:
-    """Função de fallback que usa Selenium e se adapta ao ambiente (Local vs Streamlit)."""
+    """Função de fallback que usa o Selenium Manager para autogerenciar o driver."""
     logging.warning("Abordagem rápida falhou. Usando fallback com Selenium (mais lento).")
     driver = None
     try:
         options = Options()
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
         options.add_argument(f'user-agent={USER_AGENT}')
         options.add_argument('--headless')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
         options.add_argument('--log-level=3')
         options.page_load_strategy = 'eager'
         options.add_experimental_option("prefs", {"profile.managed_default_content_settings.images": 2})
 
-        # --- IMPORTANTE: LÓGICA PARA DETECÇÃO DE AMBIENTE ---
-        # Esta parte estava faltando no código que você colou.
-        if sys.platform == "linux":
-            logging.info("Ambiente Linux (Streamlit) detectado. Usando configurações específicas.")
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            service = Service(executable_path="/usr/bin/chromedriver")
-            driver = webdriver.Chrome(service=service, options=options)
-        else:
-            logging.info("Ambiente local detectado. Usando webdriver-manager.")
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=options)
-        # --- FIM DA LÓGICA DE DETECÇÃO ---
-
+        # --- SIMPLIFICADO: Não precisamos mais do Service ou do if/else ---
+        # O Selenium Manager cuidará de tudo automaticamente.
+        driver = webdriver.Chrome(options=options)
+        
         driver.get(url)
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "rso")))
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.ID, "rso")))
         html_final = driver.page_source
         resultado = _analisar_html(html_final, nickname_limpo, cidade)
         
         return resultado if resultado else "Nao encontrado (Selenium)"
 
     except Exception as e:
-        logging.error(f"Ocorreu um erro com o Selenium no ambiente {sys.platform}: {e}", exc_info=True)
+        logging.error(f"Ocorreu um erro com o Selenium: {e}", exc_info=True)
         return "Erro Selenium"
     finally:
         if driver:
             driver.quit()
 
 def buscar_cnpj_rapidamente(nickname: str, cidade: str) -> str:
-    # Esta função está correta e não precisa de alterações.
     nickname_limpo = re.sub(r'^\.|\.$', '', nickname).strip()
     query = f'"{nickname_limpo}" "{cidade}" {SITES_ALVO}'
     url = f"https://www.google.com/search?q={quote_plus(query)}&gl=br&hl=pt"
@@ -108,7 +90,7 @@ def buscar_cnpj_rapidamente(nickname: str, cidade: str) -> str:
         headers = {'User-Agent': USER_AGENT}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        if "Nossos sistemas detectaram tráfego incomum" in response.text or "Our systems have detected unusual traffic" in response.text:
+        if "Nossos sistemas detectaram tráfego incomum" in response.text:
             logging.warning("Google retornou página de bloqueio para o `requests`.")
             return _buscar_com_selenium_fallback(url, nickname_limpo, cidade)
         resultado = _analisar_html(response.text, nickname_limpo, cidade)
@@ -121,17 +103,3 @@ def buscar_cnpj_rapidamente(nickname: str, cidade: str) -> str:
     except requests.exceptions.RequestException as e:
         logging.error(f"Erro na requisição HTTP: {e}. Usando fallback com Selenium.")
         return _buscar_com_selenium_fallback(url, nickname_limpo, cidade)
-
-# O bloco de teste abaixo não afeta o funcionamento no Streamlit
-if __name__ == '__main__':
-    nickname_empresa = ".ABCOMPRAS"
-    cidade_empresa = "Pompéia"
-    start_time = time.time()
-    resultado_cnpj = buscar_cnpj_rapidamente(nickname_empresa, cidade_empresa)
-    end_time = time.time()
-    print("\n" + "="*40)
-    print("--- RESULTADO FINAL ---")
-    print(f"Empresa: '{nickname_empresa}' em '{cidade_empresa}'")
-    print(f"CNPJ Encontrado: {resultado_cnpj}")
-    print(f"Tempo de execução: {end_time - start_time:.2f} segundos")
-    print("="*40)

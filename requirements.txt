@@ -1,8 +1,5 @@
+# requirements.txt
 streamlit
-pandas
 requests
-selenium
-webdriver-manager
 beautifulsoup4
-lxml
-openpyxl
+selenium
