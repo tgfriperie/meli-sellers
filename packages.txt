@@ -1,1 +1,5 @@
+wget
+gnupg
+unzip
+google-chrome-stable
 chromium-browser
